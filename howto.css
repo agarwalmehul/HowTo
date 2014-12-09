@@ -1,0 +1,58 @@
+
+#ptotemy-game {
+    width: 640px;
+    height: 480px;
+    background: rgba(1, 1, 1, 1);
+    position: fixed;
+}
+
+#entities, #items {
+    display: none;
+}
+
+.environment, .location {
+    height: 100%;
+    width: 100%;
+    position: absolute;
+}
+
+#inthowto {
+
+}
+
+#inthowto .location{
+    color: whitesmoke;
+    height: auto;
+    width: auto;
+    padding: 5px;
+    border-radius: 5px;
+    background: rgba(120, 120, 120, 0.5);
+    display: none;
+}
+
+#diva {
+    position: absolute;
+    height: 100px;
+    width: 70px;
+    top: 0;
+    left: 0;
+    background: rgba(255, 0, 0, 1);
+}
+
+#divb {
+    position: absolute;
+    height: 100px;
+    width: 100px;
+    bottom: 0;
+    right: 0;
+    background: rgba(0, 255, 0, 1);
+}
+
+#divc {
+    position: absolute;
+    height: 200px;
+    width: 111px;
+    top: 25%;
+    left: 0%;
+    background: rgba(0, 0, 255, 1);
+}
