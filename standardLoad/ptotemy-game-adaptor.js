@@ -1,71 +1,3 @@
-var Class = function () {
-    var parent,
-        methods,
-        klass = function () {
-            this.initialize.apply(this, arguments);
-            //copy the properties so that they can be called directly from the child
-            //class without $super, i.e., this.name
-            var reg = /\(([\s\S]*?)\)/;
-            var params = reg.exec(this.initialize.toString());
-            if (params) {
-                var param_names = params[1].split(',');
-                for (var i = 0; i < param_names.length; i++) {
-                    this[param_names[i]] = arguments[i];
-                }
-            }
-        },
-        extend = function (destination, source) {
-            for (var property in source) {
-                destination[property] = source[property];
-            }
-            //IE 8 Bug: Native Object methods are only accessible directly
-            //and do not come up in for loops. ("DontEnum Bug")
-            if (!Object.getOwnPropertyNames) {
-                var objMethods = [
-                    'toString'
-                    , 'valueOf'
-                    , 'toLocaleString'
-                    , 'isPrototypeOf'
-                    , 'propertyIsEnumerable'
-                    , 'hasOwnProperty'
-                ];
-
-                for (var i = 0; i < objMethods.length; i++) {
-                    // if (  isNative(source,objMethods[i])
-                    if (typeof source[objMethods[i]] === 'function'
-                        && source[objMethods[i]].toString().indexOf('[native code]') == -1) {
-                        document.writeln('copying ' + objMethods[i] + '<br>');
-                        destination[objMethods[i]] = source[objMethods[i]];
-                    }
-                }
-            }
-
-            destination.$super = function (method) {
-                return this.$parent[method].apply(this.$parent, Array.prototype.slice.call(arguments, 1));
-            };
-            return destination;
-        };
-
-    if (typeof arguments[0] === 'function') {
-        parent = arguments[0];
-        methods = arguments[1];
-    } else {
-        methods = arguments[0];
-    }
-
-    if (parent !== undefined) {
-        extend(klass.prototype, parent.prototype);
-        klass.prototype.$parent = parent.prototype;
-    }
-    extend(klass.prototype, methods);
-    klass.prototype.constructor = klass;
-
-    if (!klass.prototype.initialize) klass.prototype.initialize = function () {
-    };
-
-    return klass;
-};
-
 /* ----------------------------------------------------------- */
 /* Helper Functions */
 /* ----------------------------------------------------------- */
@@ -82,11 +14,27 @@ function loadConfig(obj) {
                 for (var l in data.locations[k].states) {
                     thisLoc.defineState(data.locations[k].states[l].name, data.locations[k].states[l].representation);
                 }
+                if (data.locations[k].positioned) {
+                    $('#' + data.locations[k].name).css({
+                        left: data.locations[k].left + "%",
+                        top: data.locations[k].top + "%",
+                        height: data.locations[k].height,
+                        width: data.locations[k].width
+                    })
+                }
             }
             break;
         case "entity":
             for (var m in data.states) {
                 obj.defineState(data.states[m].name, data.states[m].representation);
+            }
+            for (var n in data.items) {
+                for (var p = 0; p < data.items[n].count; p++) {
+                    var thisItem = obj.createItem(data.items[n].name + "_" + p, data.items[n].attributes);
+                    for (var o in data.items[n].states) {
+                        thisItem.defineState(data.items[n].states[o].name, data.items[n].states[o].representation);
+                    }
+                }
             }
             break;
         default:
@@ -122,19 +70,63 @@ function findById(objClass, id) {
     return (result == undefined) ? "Not Found" : result;
 }
 
-function shuffle(array) {
-    for (var j, x, i = array.length; i; j = Math.floor(Math.random() * i), x = array[--i], array[i] = array[j], array[j] = x);
-    return array;
-}
+(function ($) {
+    $.fn.countTo = function (options) {
+        // merge the default plugin settings with the custom options
+        options = $.extend({}, $.fn.countTo.defaults, options || {});
+
+        // how many times to update the value, and how much to increment the value on each update
+        var loops = Math.ceil(options.speed / options.refreshInterval),
+            increment = (options.to - options.from) / loops;
+
+        return $(this).each(function () {
+            var _this = this,
+                loopCount = 0,
+                value = options.from,
+                interval = setInterval(updateTimer, options.refreshInterval);
+
+            function updateTimer() {
+                value += increment;
+                loopCount++;
+                $(_this).html(parseFloat(value).toFixed(options.decimals));
+
+                if (typeof(options.onUpdate) == 'function') {
+                    options.onUpdate.call(_this, value);
+                }
+
+                if (loopCount >= loops) {
+                    clearInterval(interval);
+                    value = options.to;
+
+                    if (typeof(options.onComplete) == 'function') {
+                        options.onComplete.call(_this, value);
+                    }
+                }
+            }
+        });
+    };
+
+    $.fn.countTo.defaults = {
+        from: 0,  // the number the element should start at
+        to: 100,  // the number the element should end at
+        speed: 1000,  // how long it should take to count between the target numbers
+        refreshInterval: 100,  // how often the element should be updated
+        decimals: 0,  // the number of decimal places to show
+        onUpdate: null,  // callback method for every time the element is updated,
+        onComplete: null  // callback method for when the element finishes updating
+    };
+})(jQuery);
 
 /* ----------------------------------------------------------- */
 /* View State Helper */
 /* ----------------------------------------------------------- */
 
-var State = Class({
-    initialize: function (name, representation) {
-        this.name = name;
-        this.representation = representation;
+var State = Fiber.extend(function () {
+    return {
+        init: function (name, representation) {
+            this.name = name;
+            this.representation = representation;
+        }
     }
 });
 
@@ -159,7 +151,7 @@ function setStateFn(obj, stateName) {
     })[0];
 
     if (thisState != -1 && thisState != undefined) {
-        $objElm.html(thisState.representation)
+        $objElm.html(thisState.representation);
         return true;
     } else {
         return false
@@ -174,24 +166,26 @@ function div(klass, kid) {
 /* Logger Class */
 /* ----------------------------------------------------------- */
 
-var Logger = Class({
-    initialize: function (name) {
-        this.name = name;
-        var privatelog = "";
-        this.update = function (value) {
-            privatelog = value;
-        };
-        this.contents = function () {
-            return privatelog;
+var Logger = Fiber.extend(function () {
+    return {
+        init: function (name) {
+            this.name = name;
+            var privatelog = "";
+            this.update = function (value) {
+                privatelog = value;
+            };
+            this.contents = function () {
+                return privatelog;
+            }
+        },
+        add: function (msg) {
+            this.update(this.contents() + msg + '<br/>');
+            $(this).trigger('updated');
+            return true;
+        },
+        reads: function () {
+            return this.contents();
         }
-    },
-    add: function (msg) {
-        this.update(this.contents() + msg + '<br/>');
-        $(this).trigger('updated');
-        return true;
-    },
-    reads: function () {
-        return this.contents();
     }
 });
 
@@ -202,126 +196,130 @@ var log = new Logger('Base');
 /* Environment Classes */
 /* ----------------------------------------------------------- */
 
-var Location = Class({
-    initialize: function (name, environment, sequence, entities, items, states) {
-        this.name = name;
-        this.environment = environment;
-        this.sequence = sequence;
-        this.entities = entities;
-        this.items = items;
-        this.states = states;
-        log.add('Location ' + this.name + ' created in ' + this.environment.name);
+var Location = Fiber.extend(function () {
+    return {
+        init: function (name, environment, sequence, entities, items, states) {
+            this.name = name;
+            this.environment = environment;
+            this.sequence = sequence;
+            this.entities = entities;
+            this.items = items;
+            this.states = states;
+            log.add('Location ' + this.name + ' created in ' + this.environment.name);
 
-        var currentState = "default";
-        this.setMyState = function (stateName) {
-            currentState = stateName;
-        };
-        this.getMyState = function () {
-            return currentState;
+            var currentState = "default";
+            this.setMyState = function (stateName) {
+                currentState = stateName;
+            };
+            this.getMyState = function () {
+                return currentState;
+            }
+        },
+        defineState: function (stateName, representation) {
+            return defineStateFn(this, stateName, representation);
+        },
+        setState: function (stateName) {
+            var newState = setStateFn(this, stateName);
+            if (newState) this.setMyState(stateName);
+            return newState;
+        },
+        getState: function () {
+            return this.getMyState();
+        },
+        putEntity: function (entity) {
+            if (this.entities == undefined) this.entities = [];
+            this.entities.push(entity);
+            return true;
+        },
+        removeEntity: function (entity) {
+            if (this.entities.indexOf(entity) != -1) {
+                this.entities.splice(this.entities.indexOf(entity), 1);
+                return true
+            }
+            return false;
+        },
+        putItem: function (item) {
+            if (this.items == undefined) this.items = [];
+            this.items.push(item);
+            return true;
+        },
+        removeItem: function (item) {
+            if (this.items.indexOf(item) != -1) {
+                this.items.splice(this.items.indexOf(item), 1);
+                return true
+            }
+            return false;
         }
-    },
-    defineState: function (stateName, representation) {
-        return defineStateFn(this, stateName, representation);
-    },
-    setState: function (stateName) {
-        var newState = setStateFn(this, stateName);
-        if (newState) this.setMyState(stateName);
-        return newState;
-    },
-    getState: function () {
-        return this.getMyState();
-    },
-    putEntity: function (entity) {
-        if (this.entities == undefined) this.entities = [];
-        this.entities.push(entity);
-        return true;
-    },
-    removeEntity: function (entity) {
-        if (this.entities.indexOf(entity) != -1) {
-            this.entities.splice(this.entities.indexOf(entity), 1);
-            return true
-        }
-        return false;
-    },
-    putItem: function (item) {
-        if (this.items == undefined) this.items = [];
-        this.items.push(item);
-        return true;
-    },
-    removeItem: function (item) {
-        if (this.items.indexOf(item) != -1) {
-            this.items.splice(this.items.indexOf(item), 1);
-            return true
-        }
-        return false;
     }
 });
 
-var Environment = Class({
-    initialize: function (name, parent, locations, environments, states) {
-        this.name = name;
-        this.parent = parent;
-        this.locations = locations;
-        this.environments = environments;
-        this.states = states;
-        if (this.parent == undefined) {
-            $('#ptotemy-game').append(div("environment", this.name));
-        }
-        log.add('Environment ' + name + ' created.');
+var Environment = Fiber.extend(function () {
+    return {
+        init: function (name, parent, locations, environments, states) {
+            this.name = name;
+            this.parent = parent;
+            this.locations = locations;
+            this.environments = environments;
+            this.states = states;
+            if (this.parent == undefined) {
+                $('#ptotemy-game').append(div("environment", this.name));
+            }
+            log.add('Environment ' + name + ' created.');
 
-        var currentState = "default";
-        this.setMyState = function (stateName) {
-            currentState = stateName;
-        };
-        this.getMyState = function () {
-            return currentState;
-        }
+            var currentState = "default";
+            this.setMyState = function (stateName) {
+                currentState = stateName;
+            };
+            this.getMyState = function () {
+                return currentState;
+            }
 
-    },
-    defineState: function (stateName, representation) {
-        return defineStateFn(this, stateName, representation);
-    },
-    setState: function (stateName) {
-        var newState = setStateFn(this, stateName);
-        if (newState) this.setMyState(stateName);
-        return newState;
-    },
-    getState: function () {
-        return this.getMyState();
-    },
-    addLocation: function (locationName, sequence) {
-        var thisLocation = toSnakeCase(locationName.toLowerCase());
-        this[thisLocation] = new Location(locationName, this, (sequence == undefined ? "NA" : sequence), [], [], []);
-        if (this.locations == undefined) this.locations = [];
-        this.locations.push(this[thisLocation]);
-        $("#" + this.name).append(div("location", this[thisLocation].name));
-        return this[thisLocation];
-    },
-    addEnvironment: function (environmentName) {
-        this[environmentName] = new Environment(environmentName, this, [], [], []);
-        if (this.environments == undefined) this.environments = [];
-        this.environments.push(this[environmentName]);
-        $("#" + this.name).append(div("environment", this[environmentName].name));
-        return this[environmentName];
-    },
-    prevLocation: function (location) {
-        var currIndex = location.sequence;
-        if (currIndex == 0 || currIndex == "NA") {
-            return location;
-        } else {
-            return $.grep(this.locations, function (a) {
-                return ( a.sequence == currIndex - 1 );
-            })[0];
-        }
-    },
-    nextLocation: function (location) {
-        var currIndex = location.sequence;
-        if (currIndex == this.locations.length || currIndex == "NA") {
-            return location;
-        } else {
-            return $.grep(this.locations, function (a) {
-                return ( a.sequence == currIndex + 1 );
-            })[0];
+        },
+        defineState: function (stateName, representation) {
+            return defineStateFn(this, stateName, representation);
+        },
+        setState: function (stateName) {
+            var newState = setStateFn(this, stateName);
+            if (newState) this.setMyState(stateName);
+            return newState;
+        },
+        getState: function () {
+            return this.getMyState();
+        },
+        addLocation: function (locationName, sequence) {
+            var thisLocation = toSnakeCase(locationName.toLowerCase());
+            this[thisLocation] = new Location(locationName, this, (sequence == undefined ? "NA" : sequence), [], [], []);
+            if (this.locations == undefined) this.locations = [];
+            this.locations.push(this[thisLocation]);
+            $("#" + this.name).append(div("location", this[thisLocation].name));
+            return this[thisLocation];
+        },
+        addEnvironment: function (environmentName) {
+            this[environmentName] = new Environment(environmentName, this, [], [], []);
+            if (this.environments == undefined) this.environments = [];
+            this.environments.push(this[environmentName]);
+            $("#" + this.name).append(div("environment", this[environmentName].name));
+            return this[environmentName];
+        },
+        prevLocation: function (location) {
+            var currIndex = location.sequence;
+            if (currIndex == 0 || currIndex == "NA") {
+                return location;
+            } else {
+                return $.grep(this.locations, function (a) {
+                    return ( a.sequence == currIndex - 1 );
+                })[0];
+            }
+        },
+        nextLocation: function (location) {
+            var currIndex = location.sequence;
+            if (currIndex == this.locations.length || currIndex == "NA") {
+                return location;
+            } else {
+                return $.grep(this.locations, function (a) {
+                    return ( a.sequence == currIndex + 1 );
+                })[0];
+            }
         }
     }
 });
@@ -330,21 +328,12 @@ var Environment = Class({
 /* Currency Class - Used with Entities */
 /* ----------------------------------------------------------- */
 
-var Currency = Class({
-    initialize: function (name) {
-        this.name = name;
-        log.add('Currency ' + name + ' created')
-    }
-});
-
-/* ----------------------------------------------------------- */
-/* Attribute Class - Used with Items */
-/* ----------------------------------------------------------- */
-
-var Attribute = Class({
-    initialize: function (name) {
-        this.name = name;
-        log.add('Attribute ' + name + ' created')
+var Currency = Fiber.extend(function () {
+    return {
+        init: function (name) {
+            this.name = name;
+            log.add('Currency ' + name + ' created')
+        }
     }
 });
 
@@ -352,44 +341,52 @@ var Attribute = Class({
 /* Wallet Class */
 /* ----------------------------------------------------------- */
 
-var Wallet = Class({
-    initialize: function (owner, contents, min, max) {
-        this.owner = owner;
-        this.contents = contents;
-        this.min = min;
-        this.max = max;
-        log.add(this.owner.name.toLowerCase() + '.' + this.contents.name.toLowerCase() + ' created');
+var Wallet = Fiber.extend(function () {
+    return {
+        init: function (owner, contents, min, max) {
+            this.owner = owner;
+            this.contents = contents;
+            this.min = min;
+            this.max = max;
+            log.add(this.owner.name.toLowerCase() + '.' + this.contents.name.toLowerCase() + ' created');
 
-        var amount = 0;
-        this.contains = function (value) {
-            switch (true) {
-                case (value > this.max):
-                    $(this).trigger("max", [value, this.max]);
-                    log.add(this.contents.name + ' update failed due to a Max out. Amount unchanged');
-                    return false;
-                case (value < this.min):
-                    $(this).trigger("min", [value, this.min]);
-                    log.add(this.contents.name + ' update failed due to a Min out. Amount unchanged');
-                    return false;
-                case (value == null):
-                    return amount;
-                default:
-                    amount = value;
-                    return amount;
+            var amount = 0;
+            this.contains = function (value) {
+                switch (true) {
+                    case (value > this.max):
+                        $(this).trigger("max", [value, this.max]);
+                        log.add(this.contents.name + ' update failed due to a Max out. Amount unchanged');
+                        return false;
+                    case (value < this.min):
+                        $(this).trigger("min", [value, this.min]);
+                        log.add(this.contents.name + ' update failed due to a Min out. Amount unchanged');
+                        return false;
+                    case (value == null):
+                        return amount;
+                    default:
+                        $('#' + this.contents.name + " .value").countTo({
+                            from: amount,
+                            to: value,
+                            speed: 1000,
+                            refreshInterval: 10
+                        });
+                        amount = value;
+                        return amount;
+                }
             }
+        },
+        is: function (value) {
+            log.add('Updating ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' to ' + value);
+            return this.contains(value);
+        },
+        incrBy: function (value) {
+            log.add('Increasing ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' by ' + value);
+            return this.contains(this.contains() + value);
+        },
+        decrBy: function (value) {
+            log.add('Decreasing ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' by ' + value);
+            return this.contains(this.contains() - value);
         }
-    },
-    is: function (value) {
-        log.add('Updating ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' to ' + value);
-        return this.contains(value);
-    },
-    incrBy: function (value) {
-        log.add('Increasing ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' by ' + value);
-        return this.contains(this.contains() + value);
-    },
-    decrBy: function (value) {
-        log.add('Decreasing ' + this.owner.name.toLowerCase() + "." + this.contents.name.toLowerCase() + ' by ' + value);
-        return this.contains(this.contains() - value);
     }
 });
 
@@ -397,160 +394,197 @@ var Wallet = Class({
 /* Entity Class */
 /* ----------------------------------------------------------- */
 
-var Entity = Class({
-    initialize: function (name, items, states) {
-        this.name = name;
-        this.items = items;
-        this.states = states;
-        Entity.all.push(this);
-        log.add('Entity ' + name + ' created');
-        $("#entities").append(div("entity", this.name));
+var Entity = Fiber.extend(function () {
+    return {
+        init: function (name, items, states) {
+            this.name = name;
+            this.items = items;
+            this.states = states;
+            Entity.all.push(this);
+            log.add('Entity ' + name + ' created');
+            $("#entities").append(div("entity", this.name));
 
-        var location = false;
-        this.address = function (newLocation) {
-            if (newLocation == null) {
-                return location;
-            } else {
-                location = newLocation;
-                console.log("************** CHANGE STARTS **************");
-                $('#' + location.name).append(div("entity",  this.name));
-                //$('#' + location.name).append($('#' + this.name));
-                console.log("************** CHANGE ENDS **************");
-                return true;
-            }
-        };
+            var location = false;
+            this.address = function (newLocation) {
+                if (newLocation == null) {
+                    return location;
+                } else {
+                    location = newLocation;
+                    $('#' + location.name).append($('#' + this.name));
+                    return true;
+                }
+            };
 
-        var currentState = "default";
-        this.setMyState = function (stateName) {
-            currentState = stateName;
-        };
-        this.getMyState = function () {
-            return currentState;
-        }
-    },
-    defineState: function (stateName, representation) {
-        return defineStateFn(this, stateName, representation);
-    },
-    setState: function (stateName) {
-        var newState = setStateFn(this, stateName);
-        if (newState) this.setMyState(stateName);
-        return newState;
-    },
-    getState: function () {
-        return this.getMyState();
-    },
-    createWallet: function (forCurrency, min, max, amount) {
-        var wallet = forCurrency.name.toLowerCase();
-        this[wallet] = new Wallet(this, forCurrency, min, max);
-        this[wallet].is(amount);
+            var currentState = "default";
+            this.setMyState = function (stateName) {
+                currentState = stateName;
+            };
+            this.getMyState = function () {
+                return currentState;
+            }
+        },
+        defineState: function (stateName, representation) {
+            return defineStateFn(this, stateName, representation);
+        },
+        setState: function (stateName) {
+            var newState = setStateFn(this, stateName);
+            if (newState) this.setMyState(stateName);
+            return newState;
+        },
+        getState: function () {
+            return this.getMyState();
+        },
+        createWallet: function (forCurrency, min, max, amount) {
+            var wallet = forCurrency.name.toLowerCase();
+            this[wallet] = new Wallet(this, forCurrency, min, max);
+            this[wallet].is(amount);
 
-        return true;
-    },
-    addItem: function (item) {
-        return this.items.push(item);
-    },
-    pays: function (to, value, inCurrency) {
-        var currency = inCurrency.name.toLowerCase();
-        if (this[currency].decrBy(value) != false) {
-            if (to[currency].incrBy(value) != false) {
-                log.add(this.name + ' paid ' + value + ' ' + currency + ' to ' + to.name);
-                return true;
-            } else {
-                this[currency].incrBy(value);
-            }
-        }
-        return false;
-    },
-    gives: function (item, to) {
-        if (to.items == undefined) to.items = [];
-        return item.transfer(this, to)
-    },
-    buys: function (item, seller, payment, currency) {
-        if (this.items == undefined) this.items = [];
-        if (seller.gives(item, this) != false) {
-            if (this.pays(seller, payment, currency) != false) {
-                return true;
-            } else {
-                this.gives(item, seller)
-            }
-        }
-        return false;
-    },
-    sells: function (item, buyer, payment, currency) {
-        if (buyer.items == undefined) buyer.items = [];
-        if (this.gives(item, buyer) != false) {
-            if (buyer.pays(this, payment, currency) != false) {
-                return true;
-            } else {
-                buyer.gives(item, this)
-            }
-        }
-        return false;
-    },
-    trades: function (myItem, theirItem, partner) {
-        if (this.items == undefined) this.items = [];
-        if (partner.items == undefined) partner.items = [];
-        if (this.gives(myItem, partner) != false) {
-            if (partner.gives(theirItem, this) != false) {
-                return true;
-            } else {
-                partner.gives(myItem, this)
-            }
-        }
-        return false;
-    },
-    location: function (location) {
-        if (location == undefined) {
-            return this.address();
-        } else {
-            $(this).trigger("teleporting", [this.address(), location]);
-            if (this.address() != false) {
-                this.address().removeEntity(this);
-            }
-            location.putEntity(this);
-            this.address(location);
-            log.add(this.name + ' placed at ' + location.name);
             return true;
-        }
-    },
-    moveTo: function (location) {
-        $(this).trigger("moving", [this.address(), location]);
-        this.address().removeEntity(this);
-        location.putEntity(this);
-        this.address(location);
-        log.add(this.name + ' moved to ' + location.name);
-        return true;
-    },
-    picks: function (item, location) {
-        if (this.items == undefined) this.items = [];
-        if (location.items.indexOf(item) != -1) {
+        },
+        createItem: function (itemName, attributes) {
+            var thisItem = toSnakeCase(itemName.toLowerCase());
+            this[thisItem] = new Item(itemName, attributes);
+            if (this.items == undefined) this.items = [];
+            this.items.push(this[thisItem]);
+            $("#" + this.name).append(div("item", this[thisItem].name));
+            return this[thisItem];
+        },
+        addItem: function (item) {
             this.items.push(item);
-            location.items.splice(location.items.indexOf(item), 1);
-            return true;
-        }
-        return false;
-    },
-    drops: function (item, location) {
-        if (location.items == undefined) location.items = [];
-        if (this.items.indexOf(item) != -1) {
-            location.items.push(item);
-            this.items.splice(this.items.indexOf(item), 1);
-            return true;
-        }
-        return false;
-    },
-    rollsDice: function (count) {
-        var results = [];
-        var localCount = 0;
-        for (i in this.items) {
-            if ('roll' in this.items[i]) {
-                if (localCount < count) {
-                    results.push(this.items[i].roll());
-                    localCount++;
+            $("#" + item.name).detach().appendTo("#" + this.name);
+            return item;
+        },
+        addItems: function (items) {
+            for (var i in items) {
+                this.items.push(items[i]);
+                $("#" + items[i].name).detach().appendTo("#" + this.name);
+            }
+            return items;
+        },
+        pays: function (to, value, inCurrency) {
+            var currency = inCurrency.name.toLowerCase();
+            if (this[currency].decrBy(value) != false) {
+                if (to[currency].incrBy(value) != false) {
+                    log.add(this.name + ' paid ' + value + ' ' + currency + ' to ' + to.name);
+                    return true;
+                } else {
+                    this[currency].incrBy(value);
                 }
             }
+            return false;
+        },
+        gives: function (item, to) {
+            if (to.items == undefined) to.items = [];
+            $('#' + to.name).append($('#' + item.name));
+            return item.transfer(this, to)
+        },
+        buys: function (item, seller, payment, currency) {
+            if (this.items == undefined) this.items = [];
+            if (seller.gives(item, this) != false) {
+                if (this.pays(seller, payment, currency) != false) {
+                    return true;
+                } else {
+                    this.gives(item, seller)
+                }
+            }
+            return false;
+        },
+        sells: function (item, buyer, payment, currency) {
+            if (buyer.items == undefined) buyer.items = [];
+            if (this.gives(item, buyer) != false) {
+                if (buyer.pays(this, payment, currency) != false) {
+                    return true;
+                } else {
+                    buyer.gives(item, this)
+                }
+            }
+            return false;
+        },
+        trades: function (myItem, theirItem, partner) {
+            if (this.items == undefined) this.items = [];
+            if (partner.items == undefined) partner.items = [];
+            if (this.gives(myItem, partner) != false) {
+                if (partner.gives(theirItem, this) != false) {
+                    return true;
+                } else {
+                    partner.gives(myItem, this)
+                }
+            }
+            return false;
+        },
+        location: function (location) {
+            if (location == undefined) {
+                return this.address();
+            } else {
+                if (this.address() != false) {
+                    this.address().removeEntity(this);
+                }
+                location.putEntity(this);
+                this.address(location);
+                $(this).trigger("teleporting", [this.address(), location]);
+                log.add(this.name + ' placed at ' + location.name);
+                return true;
+            }
+        },
+        moveTo: function (location, speed) {
+            var $this = this;
+            var oldLocation = this.address();
+            var newLocation = location;
+            if (oldLocation != newLocation) {
+                var $thisObj = $('#' + this.name);
+                var oldPosition = $('#' + oldLocation.name).position() || 0;
+                var newPosition = $('#' + newLocation.name).position() || 0;
+                $thisObj.stop().detach().appendTo('#' + location.environment.name);
+                if (speed === undefined) speed = 1500;
+                $($this).trigger("moving", [oldLocation, newLocation, speed]);
+                $thisObj.css({
+                    left: oldPosition.left,
+                    top: oldPosition.top
+                }).animate({
+                    left: newPosition.left,
+                    top: newPosition.top
+                }, speed, function () {
+                    $('#' + $this.name).css({'left': 0, 'top': 0});
+                    $this.address().removeEntity(this);
+                    location.putEntity(this);
+                    $this.address(location);
+                    log.add($this.name + ' moved to ' + location.name);
+                    return true;
+                });
+            }
+
+        },
+        picks: function (item, location) {
+            if (this.items == undefined) this.items = [];
+            if (location.items.indexOf(item) != -1) {
+                this.items.push(item);
+                location.items.splice(location.items.indexOf(item), 1);
+                return true;
+            }
+            return false;
+        },
+        drops: function (item, location) {
+            if (location.items == undefined) location.items = [];
+            if (this.items.indexOf(item) != -1) {
+                location.items.push(item);
+                this.items.splice(this.items.indexOf(item), 1);
+                return true;
+            }
+            return false;
+        },
+        rollsDice: function (count) {
+            var results = [];
+            var localCount = 0;
+            for (i in this.items) {
+                if ('roll' in this.items[i]) {
+                    if (localCount < count) {
+                        results.push(this.items[i].roll());
+                        localCount++;
+                    }
+                }
+            }
+            return results;
         }
-        return results;
     }
 });
 
@@ -560,47 +594,77 @@ Entity.all = [];
 /* Item Class */
 /* ----------------------------------------------------------- */
 
-var Item = Class({
-    initialize: function (name, states) {
-        this.name = name;
-        this.states = states;
-        Item.all.push(this);
-        log.add('Item ' + name + ' created.');
-        $("#items").append(div("item", this.name));
+var Item = Fiber.extend(function () {
+    return {
+        init: function (name, attributes, states) {
+            this.name = name;
+            this.attributes = attributes;
+            this.states = states;
+            Item.all.push(this);
+            log.add('Item ' + name + ' created.');
+//            $("#items").append(div("item", this.name));
 
-        var currentState = "default";
-        this.setMyState = function (stateName) {
-            currentState = stateName;
-        };
-        this.getMyState = function () {
-            return currentState;
-        }
-    },
-    defineState: function (stateName, representation) {
-        return defineStateFn(this, stateName, representation);
-    },
-    setState: function (stateName) {
-        var newState = setStateFn(this, stateName);
-        if (newState) this.setMyState(stateName);
-        return newState;
-    },
-    getState: function () {
-        return this.getMyState();
-    },
-    createAttribute: function (forAttribute, amount) {
-        var wallet = forAttribute.name.toLowerCase();
-        this[wallet] = new Wallet(this, forAttribute);
-        this[wallet].is(amount);
-        return true;
-    },
-    transfer: function (playerA, playerB) {
-        if (playerA.items.indexOf(this) != -1) {
-            playerA.items.splice(playerA.items.indexOf(this), 1);
-            playerB.items.push(this);
-            log.add(playerA.name + ' gave the ' + this.name + ' to ' + playerB.name);
+            var location = false;
+            this.address = function (newLocation) {
+                if (newLocation == null) {
+                    return location;
+                } else {
+                    location = newLocation;
+                    $('#' + location.name).append($('#' + this.name));
+                    return true;
+                }
+            };
+
+            var currentState = "default";
+            this.setMyState = function (stateName) {
+                currentState = stateName;
+            };
+            this.getMyState = function () {
+                return currentState;
+            }
+        },
+        defineState: function (stateName, representation) {
+            return defineStateFn(this, stateName, representation);
+        },
+        setState: function (stateName) {
+            var newState = setStateFn(this, stateName);
+            if (newState) this.setMyState(stateName);
+            return newState;
+        },
+        getState: function () {
+            return this.getMyState();
+        },
+        transfer: function (playerA, playerB) {
+            if (playerA.items.indexOf(this) != -1) {
+                playerA.items.splice(playerA.items.indexOf(this), 1);
+                playerB.items.push(this);
+                log.add(playerA.name + ' gave the ' + this.name + ' to ' + playerB.name);
+                return true;
+            }
+            return false;
+        },
+        location: function (location) {
+            if (location == undefined) {
+                return this.address();
+            } else {
+                $(this).trigger("teleporting", [this.address(), location]);
+                if (this.address() != false) {
+                    this.address().removeItem(this);
+                }
+                location.putItem(this);
+                this.address(location);
+                log.add(this.name + ' placed at ' + location.name);
+                return true;
+            }
+        },
+        moveTo: function (location) {
+            $(this).trigger("moving", [this.address(), location]);
+            this.address().removeItem(this);
+            location.putItem(this);
+            this.address(location);
+            log.add(this.name + ' moved to ' + location.name);
             return true;
         }
-        return false;
     }
 });
 
@@ -616,92 +680,22 @@ Item.all = [];
 /* Dice Class */
 /* ----------------------------------------------------------- */
 
-var Dice = Class(Item, {
-    initialize: function (sides, name) {
-        this.sides = sides;
-        this.name = (name == null) ? "Dice#" + (Dice.all.length + 1) : name;
-        this.$super('initialize', this.name);
-        Dice.all.push(this);
-    },
-    roll: function (interval) {
-        if (interval == null) {
-            interval = 2000;
+var Dice = Item.extend(function () {
+    return {
+        roll: function (interval) {
+            if (interval == null) {
+                interval = 2000;
+            }
+            log.add(this.name + " dice started rolling for " + interval / 1000 + " secs");
+            $(this).trigger('rollStart');
+            var that = this;
+            var result = randBetween(1, that.items.length);
+            setTimeout(function () {
+                $(that).trigger('rollEnd', {result: items[result]});
+                log.add(that.name + " dice stopped. Final result was " + items[result]);
+            }, interval);
+            return items[result];
         }
-        log.add(this.name + " dice started rolling for " + interval / 1000 + " secs");
-        $(this).trigger('rollStart');
-        var that = this;
-        var result = randBetween(1, that.sides);
-        setTimeout(function () {
-            $(that).trigger('rollEnd', {result: result});
-            log.add(that.name + " dice stopped. Final result was " + result);
-        }, interval);
-        return result;
-    }
-});
-
-Dice.all = [];
-
-/* ----------------------------------------------------------- */
-/* Card Classes */
-/* ----------------------------------------------------------- */
-
-var Card = Class(Item, {
-    initialize: function (name) {
-        this.name = name;
-        this.$super('initialize', this.name);
-        Card.all.push(this);
-    }
-});
-
-Card.all = [];
-
-var CardDeck = Class(Entity, {
-    initialize: function (name, cards) {
-        this.$super('initialize', name, cards);
-        this.name = name;
-        this.cards = cards;
-    },
-    createCards: function (cardNames) {
-        if (this.cards == undefined) this.cards = [];
-        for (i in cardNames) {
-            this.cards.push(new Card(cardNames[i]));
-        }
-        return true;
-    },
-    loadCards: function (cards) {
-        if (this.cards == undefined) this.cards = [];
-        for (i in cards) {
-            this.$super('addItem', cards[i]);
-        }
-        return true;
-    },
-    shuffle: function () {
-        var o = this.cards;
-        for (var j, x, i = o.length - 1; i; j = ( Math.floor(Math.random() * i) + 1), x = o[--i], o[i] = o[j], o[j] = x);
-        this.cards = o;
-        return true;
-    },
-    swapDeck: function (deck) {
-        var tempDeck = this.cards;
-        this.cards = deck.cards;
-        deck.cards = tempDeck;
-        return true;
-    },
-    drawCard: function () {
-        var takeOut = this.cards[0];
-        this.cards.splice(0, 1);
-        return takeOut;
-    },
-    cardToTop: function (card) {
-        var newDeck = [];
-        newDeck.push(card);
-        newDeck.push(this.cards);
-        this.cards = newDeck;
-        return true;
-    },
-    cardToBottom: function (card) {
-        this.cards.push(card);
-        return true;
     }
 });
 

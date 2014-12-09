@@ -1,8 +1,7 @@
-
-var inthowto;
-var base;
 var config = {};
-
+var howto;
+var base;
+var howtoFlag;
 config.base = {
     type: "environment",
     states: [
@@ -19,46 +18,86 @@ config.base = {
 
         {name: "divc", states: [
             {name: "default", representation: ""}
+        ]},
+
+        {name: "howtoholder", states: [
+            {name: "default", representation: ""}
         ]}
     ]
 }
+base = new Environment("base");
+loadConfig(base);
 
-config.inthowto = {
-    type: "environment",
+var howtoData = [
+    {loc: base.diva, description: "This", sequence: 0},
+    {loc: base.divb, description: "This is Div B This is Div B This is Div B This is Div B This is Div B This is Div B ", sequence: 1},
+    {loc: base.divc, description: "This is Div C", sequence: 2}
+]
+
+
+
+
+
+config.howto = {
+    type: "entity",
     states: [
-        {name: "default", representation: ""}
-    ],
-    locations: function () {
-        var locs = [];
-        for (var i in howto) {
-            locs.push({
-                name: "howto" + i,
-                sequence: howto[i].sequence,
-                states: [
-                    {name: howto[i].locName, representation: "<span>" + howto[i].description + "</span>"}
-                ]});
-        }
-        return locs;
-    }()
+        {name: "active", representation: "ACTIVE"},
+        {name: "default", representation: "DEFAULT"}
+    ]
 }
 
 $(function() {
-    base = new Environment("base");
-    loadConfig(base);
     initHowTo();
 });
 
 function initHowTo() {
-    inthowto = new Environment("inthowto");
-    config.inthowto.locations.sort(function(a, b){
+    howto = new Entity("howto");
+
+    //Sort howtoData according to its 'sequence'
+    howtoData.sort(function(a, b){
         var a1= a.sequence, b1= b.sequence;
         if(a1 == b1) return 0;
         return a1> b1? 1: -1;
     });
 
-    loadConfig(inthowto);
-    placeHowTo();
-    animateHowTo();
+    howtoFlag = 0;
+
+    loadConfig(howto);
+    howto.location(base.howtoholder);
+    howtoStart();
+}
+
+function howtoStart() {
+    console.log(howtoData[howtoFlag].loc.name);
+    howto.moveTo(howtoData[howtoFlag].loc, 1000);
+    setTimeout(function() {
+        howto.states[0].representation = howtoData[howtoFlag].description;
+        howto.setState('active');
+        setTimeout(function() {howto.setState('default');}, 1500)
+    }, 1500);
+
+    setTimeout(function() {
+        var next = incHowtoFlag();
+        if(next)
+            howtoStart();
+        else
+            howtoHide();
+    }, (2500)+1000);
+}
+
+function incHowtoFlag() {
+    howtoFlag++;
+    if(howtoFlag < howtoData.length)
+        return true;
+    else
+        return false;
+}
+
+function howtoHide() {
+    $("#howto").fadeOut(750);
+    setTimeout(function() {
+        howto.location(base.howtoholder);
+    }, 750);
 }
 
 function placeHowTo() {

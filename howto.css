@@ -16,8 +16,9 @@
     position: absolute;
 }
 
-#inthowto {
-
+#howto {
+    position: absolute;
+    color: whitesmoke;
 }
 
 #inthowto .location{
@@ -55,4 +56,10 @@
     top: 25%;
     left: 0%;
     background: rgba(0, 0, 255, 1);
+}
+
+#howtoholder {
+    right: 0 !important;
+    height: auto;
+    width: auto;
 }
